@@ -1,6 +1,7 @@
 import { RequestHandler } from 'express';
 import { connectToDatabase } from '../db';
 import Ride from '../models/Ride';
+import User from '../models/User';
 import { calculateRealDistance, estimateDistance, calculatePricePerSeat } from '../utils/distance';
 
 /**
@@ -29,6 +30,20 @@ export const handleOfferRide: RequestHandler = async (req, res) => {
     if (!driverId || !driverName || !driverEmail || !pickupLocation || !dropoffLocation || !date || !time || !carBrand || !carModel) {
       res.status(400).json({
         error: 'Missing required fields',
+      });
+      return;
+    }
+
+    // Check if driver has an active ride
+    const activeRide = await Ride.findOne({
+      driverId,
+      status: 'active',
+    });
+
+    if (activeRide) {
+      res.status(409).json({
+        error: 'You have an active ride. Please complete it before creating a new ride.',
+        activeRideId: activeRide._id,
       });
       return;
     }
@@ -68,6 +83,16 @@ export const handleOfferRide: RequestHandler = async (req, res) => {
     });
 
     await ride.save();
+
+    // Try to set the driver's active ride (only if driver exists in User collection)
+    try {
+      await User.findByIdAndUpdate(driverId, {
+        activeRideId: ride._id.toString(),
+      });
+    } catch (error) {
+      // Driver might not exist in User table yet - that's okay for temporary drivers
+      console.log(`Note: Could not update user record for driver ${driverId}`);
+    }
 
     res.status(201).json({
       message: 'Ride offered successfully',

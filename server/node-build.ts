@@ -22,7 +22,13 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-app.listen(port, () => {
+// create http server to attach socket.io
+import http from 'http';
+import { initSocketServer } from './socket';
+const httpServer = http.createServer(app);
+initSocketServer(httpServer);
+
+httpServer.listen(port, () => {
   console.log(`🚀 Fusion Starter server running on port ${port}`);
   console.log(`📱 Frontend: http://localhost:${port}`);
   console.log(`🔧 API: http://localhost:${port}/api`);

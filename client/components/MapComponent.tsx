@@ -1,10 +1,25 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MapPin, Navigation, Loader, AlertCircle } from "lucide-react";
 
+interface LocationData {
+  lat: number;
+  lng: number;
+  timestamp?: number;
+}
+
 interface MapComponentProps {
   pickup: string;
   dropoff: string;
   height?: string;
+  onRouteReady?: (distance: number, duration: string) => void;
+  currentLocation?: LocationData | null;
+  otherLocation?: LocationData | null;
+  userType?: "driver" | "passenger";
+}
+
+interface RouteData {
+  distanceKm: number;
+  durationText: string;
 }
 
 declare global {
@@ -17,32 +32,52 @@ let mapsScriptLoading = false;
 let mapsScriptLoaded = false;
 const mapsScriptCallbacks: (() => void)[] = [];
 
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY;
+
 export default function MapComponent({
   pickup,
   dropoff,
   height = "h-96",
+  onRouteReady,
+  currentLocation,
+  otherLocation,
+  userType = "passenger",
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const directionsRendererRef = useRef<any>(null);
   const directionsServiceRef = useRef<any>(null);
+  const markersRef = useRef<any>({ current: null, other: null });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [routeData, setRouteData] = useState<RouteData | null>(null);
 
   // Load Google Maps API script
   useEffect(() => {
+    if (!API_KEY) {
+      console.error("❌ VITE_GOOGLE_MAPS_KEY environment variable is not set");
+      setError("Maps API key not configured. Check your .env file.");
+      setIsLoading(false);
+      return;
+    }
+
     const loadMapsAPI = () => {
       if (mapsScriptLoaded && window.google) {
-        // Maps already loaded
         initializeMap();
       } else if (mapsScriptLoading) {
-        // Maps script is loading, wait for it
         mapsScriptCallbacks.push(() => initializeMap());
       } else {
-        // Start loading maps script
         mapsScriptLoading = true;
         const script = document.createElement("script");
-        script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBDQDA3xAwrnuiNxN3RTpP7Y3Kxe_Cd6Ig&libraries=places,directions`;
+        
+        // Build URL with proper parameters
+        const params = new URLSearchParams({
+          key: API_KEY,
+          libraries: "places,directions,geometry",
+          v: "weekly",
+        });
+        
+        script.src = `https://maps.googleapis.com/maps/api/js?${params}`;
         script.async = true;
         script.defer = true;
         
@@ -50,7 +85,6 @@ export default function MapComponent({
           mapsScriptLoaded = true;
           console.log("✓ Google Maps API loaded successfully");
           initializeMap();
-          // Call any pending callbacks
           while (mapsScriptCallbacks.length > 0) {
             const callback = mapsScriptCallbacks.shift();
             if (callback) callback();
@@ -58,9 +92,12 @@ export default function MapComponent({
         };
 
         script.onerror = () => {
-          console.error("✗ Failed to load Google Maps API");
-          setError("Failed to load Google Maps. Please check your internet connection.");
+          console.error("✗ Failed to load Google Maps API - Check API key, quota, and billing");
+          setError(
+            "Failed to load Google Maps. Verify API key in Google Cloud Console."
+          );
           setIsLoading(false);
+          mapsScriptLoading = false;
         };
 
         document.head.appendChild(script);
@@ -152,28 +189,89 @@ export default function MapComponent({
       if (result.status === window.google.maps.DirectionsStatus.OK) {
         directionsRendererRef.current.setDirections(result);
 
-        // Get distance and duration
+        // Extract route data
         const route = result.routes[0];
         if (route?.legs?.[0]) {
           const leg = route.legs[0];
-          console.log(`✓ Route found: ${leg.distance.text}, Duration: ${leg.duration.text}`);
+          const distanceKm = leg.distance.value / 1000;
+          const durationText = leg.duration.text;
+          
+          const data: RouteData = {
+            distanceKm,
+            durationText,
+          };
+          
+          setRouteData(data);
+          
+          if (onRouteReady) {
+            onRouteReady(distanceKm, durationText);
+          }
+          
+          console.log(
+            `✓ Route: ${leg.distance.text} | Duration: ${durationText}`
+          );
         }
         setError(null);
+      } else if (result.status === "ZERO_RESULTS") {
+        console.warn("No route found between locations");
+        setError("No route found between these locations. Check the addresses.");
+      } else if (result.status === "REQUEST_DENIED") {
+        console.error("Directions API request denied - check API key permissions");
+        setError("Maps API not properly configured. Enable Directions API.");
       } else {
-        const errorMsg = result.status === "ZERO_RESULTS"
-          ? "No route found between these locations"
-          : `Directions request failed: ${result.status}`;
-        console.error(errorMsg);
-        setError(errorMsg);
+        console.error(`Directions error: ${result.status}`);
+        setError(`Unable to calculate route: ${result.status}`);
       }
     } catch (err) {
-      const errorMsg = "Failed to load route. Please check the locations and try again.";
-      console.error(errorMsg, err);
+      const errorMsg =
+        err instanceof Error ? err.message : "Failed to load route";
+      console.error("Route calculation error:", err);
       setError(errorMsg);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Update live location markers
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.google) return;
+
+    // Update current user location marker
+    if (currentLocation) {
+      if (markersRef.current.current) {
+        markersRef.current.current.setPosition(
+          new window.google.maps.LatLng(currentLocation.lat, currentLocation.lng)
+        );
+      } else {
+        markersRef.current.current = new window.google.maps.Marker({
+          position: { lat: currentLocation.lat, lng: currentLocation.lng },
+          map: mapInstanceRef.current,
+          title: userType === "driver" ? "🚗 You (Driver)" : "👤 You (Passenger)",
+          icon: userType === "driver" 
+            ? "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+            : "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
+        });
+      }
+    }
+
+    // Update other user location marker
+    if (otherLocation) {
+      if (markersRef.current.other) {
+        markersRef.current.other.setPosition(
+          new window.google.maps.LatLng(otherLocation.lat, otherLocation.lng)
+        );
+      } else {
+        markersRef.current.other = new window.google.maps.Marker({
+          position: { lat: otherLocation.lat, lng: otherLocation.lng },
+          map: mapInstanceRef.current,
+          title: userType === "driver" ? "👤 Passenger" : "🚗 Driver",
+          icon: userType === "driver"
+            ? "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png"
+            : "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+        });
+      }
+    }
+  }, [currentLocation, otherLocation, userType]);
 
   return (
     <div className={`${height} relative rounded-xl shadow-md overflow-hidden border-2 border-blue-200`}>
@@ -222,12 +320,33 @@ export default function MapComponent({
               </div>
             </div>
 
-            {/* Divider */}
+            {/* Divider & Route Info */}
             <div className="flex items-center gap-2 px-2">
               <div className="flex-1 h-px bg-gray-300"></div>
               <Navigation className="w-4 h-4 text-blue-500 rotate-90 flex-shrink-0" />
               <div className="flex-1 h-px bg-gray-300"></div>
             </div>
+
+            {/* Route Stats */}
+            {routeData && (
+              <div className="bg-blue-50 rounded px-3 py-2">
+                <div className="flex justify-between items-center gap-3">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-600">Distance</p>
+                    <p className="text-sm font-bold text-blue-600">
+                      {routeData.distanceKm.toFixed(1)} km
+                    </p>
+                  </div>
+                  <div className="w-px h-8 bg-blue-200"></div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-600">Duration</p>
+                    <p className="text-sm font-bold text-blue-600">
+                      {routeData.durationText}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Dropoff */}
             <div className="flex items-start gap-3">

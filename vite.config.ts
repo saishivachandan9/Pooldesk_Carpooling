@@ -6,7 +6,7 @@ import { createServer } from "./server";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
+    host: "0.0.0.0",
     port: 8080,
     fs: {
       allow: ["./client", "./shared"],
@@ -28,11 +28,12 @@ export default defineConfig(({ mode }) => ({
 function expressPlugin(): Plugin {
   return {
     name: "express-plugin",
-    apply: "serve", // Only apply during development (serve mode)
+    apply: "serve",
     configureServer(server) {
       const app = createServer();
-
-      // Add Express app as middleware to Vite dev server
+      
+      // In dev mode, just add express as middleware without socket.io
+      // Socket.io will work properly in production via node-build.ts
       server.middlewares.use(app);
     },
   };

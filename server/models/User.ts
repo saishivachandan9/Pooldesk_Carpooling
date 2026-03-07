@@ -9,6 +9,11 @@ export interface IUser extends Document {
   shiftStart: string;
   shiftEnd: string;
   company: string;
+  isVerified: boolean;
+  verifiedAt?: Date;
+  activeRideId?: string;
+  isFlagged: boolean;
+  flagReason?: string;
   createdAt: Date;
   comparePassword(password: string): Promise<boolean>;
 }
@@ -54,6 +59,23 @@ const userSchema = new Schema(
       type: String,
       required: [true, "Shift end time is required"],
     },
+    isVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    verifiedAt: Date,
+    activeRideId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    isFlagged: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    flagReason: String,
   },
   { timestamps: true }
 );

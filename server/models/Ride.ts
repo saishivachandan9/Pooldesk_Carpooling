@@ -5,12 +5,14 @@ export interface IRide extends Document {
   driverName: string;
   driverEmail: string;
   driverGender: string;
+  driverPhone?: string;
   pickupLocation: string;
   dropoffLocation: string;
   date: string;
   time: string;
   carBrand: string;
   carModel: string;
+  carLicensePlate?: string;
   totalSeats: number;
   availableSeats: number;
   bookedSeats: number;
@@ -19,6 +21,9 @@ export interface IRide extends Document {
   acceptedBookings: string[]; // Array of booking IDs that have been accepted
   distanceTravelledInKm: number; // Estimated distance in kilometers
   pricePerSeat: number; // Price per seat in rupees
+  rating?: number;
+  averageRating?: number;
+  completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,12 +34,14 @@ const rideSchema = new Schema(
     driverName: { type: String, required: true },
     driverEmail: { type: String, required: true },
     driverGender: { type: String, required: true },
+    driverPhone: { type: String },
     pickupLocation: { type: String, required: true },
     dropoffLocation: { type: String, required: true },
     date: { type: String, required: true },
     time: { type: String, required: true },
     carBrand: { type: String, required: true },
     carModel: { type: String, required: true },
+    carLicensePlate: { type: String },
     totalSeats: { type: Number, required: true, min: 1, max: 7 },
     availableSeats: { type: Number, required: true, min: 0, max: 7 },
     bookedSeats: { type: Number, default: 0, min: 0 },
@@ -51,6 +58,9 @@ const rideSchema = new Schema(
     acceptedBookings: [{ type: String, default: [] }],
     distanceTravelledInKm: { type: Number, required: true, min: 0 },
     pricePerSeat: { type: Number, required: true, min: 0 },
+    rating: { type: Number, min: 1, max: 5 },
+    averageRating: { type: Number, min: 1, max: 5 },
+    completedAt: Date,
   },
   { timestamps: true }
 );

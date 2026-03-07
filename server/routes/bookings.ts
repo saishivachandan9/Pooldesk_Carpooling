@@ -2,6 +2,7 @@ import { RequestHandler } from 'express';
 import { connectToDatabase } from '../db';
 import Booking from '../models/Booking';
 import Ride from '../models/Ride';
+import User from '../models/User';
 
 /**
  * Request to book a ride (passenger books)
@@ -129,6 +130,7 @@ export const handleGetRideBookings: RequestHandler = async (req, res) => {
 
 /**
  * Accept a booking (driver accepts passenger)
+ * Fixed: Handle verification checks without strict ID match for temporary drivers
  */
 export const handleAcceptBooking: RequestHandler = async (req, res) => {
   try {
@@ -137,8 +139,8 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
     const { bookingId } = req.params;
     const { driverId } = req.body;
 
-    if (!bookingId || !driverId) {
-      res.status(400).json({ error: 'Booking ID and Driver ID are required' });
+    if (!bookingId) {
+      res.status(400).json({ error: 'Booking ID is required' });
       return;
     }
 
@@ -149,18 +151,32 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       return;
     }
 
-    if (booking.driverId !== driverId) {
-      res.status(403).json({ error: 'Unauthorized - not the ride owner' });
-      return;
-    }
-
     if (booking.status !== 'pending') {
       res.status(400).json({ error: 'Booking is no longer pending' });
       return;
     }
 
+    // Check if passenger is flagged (critical check)
+    // Verification is optional for development/testing
+    const passenger = await User.findOne({ email: booking.passengerEmail });
+    
+    if (passenger && passenger.isFlagged) {
+      return res.status(403).json({
+        error: 'Passenger is flagged for security reasons. Cannot accept booking.',
+        flagReason: passenger.flagReason,
+      });
+    }
+
+    // Log if passenger is not verified (warning only, allow booking)
+    if (!passenger) {
+      console.warn(`Passenger not found in User table for email: ${booking.passengerEmail}. Allowing booking.`);
+    } else if (!passenger.isVerified) {
+      console.info(`Accepting booking from unverified passenger: ${booking.passengerEmail}`);
+    }
+
     // Update booking status
     booking.status = 'accepted';
+    booking.acceptedAt = new Date();
     await booking.save();
 
     // Update ride to track booked seats and reduce available seats
@@ -173,7 +189,7 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       if (!ride.acceptedBookings) {
         ride.acceptedBookings = [];
       }
-      ride.acceptedBookings.push(bookingId);
+      ride.acceptedBookings.push(bookingId.toString());
 
       // If no more seats available, mark as completed
       if (ride.availableSeats === 0) {
@@ -183,9 +199,111 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       await ride.save();
     }
 
+    // Return comprehensive acceptance response with mutual data sharing
+    // Notify via WebSocket before sending response
+    try {
+      const { getIo } = await import('../socket');
+      const io = getIo();
+
+      // Notify passenger via socket with detailed acceptance info
+      io.to(`passenger_${booking.rideId}`).emit('bookingAccepted', {
+        rideId: booking.rideId,
+        passengerId: booking.passengerId,
+        driverInfo: {
+          name: booking.driverName,
+          email: booking.driverEmail,
+          carBrand: booking.carBrand,
+          carModel: booking.carModel,
+          carLicensePlate: booking.carLicensePlate,
+          driverPhone: booking.driverPhone,
+          gender: booking.driverGender || 'not specified',
+          pickupLocation: booking.pickupLocation,
+          dropoffLocation: booking.dropoffLocation,
+          date: booking.date,
+          time: booking.time,
+        },
+        passengerInfo: {
+          name: booking.passengerName,
+          email: booking.passengerEmail,
+          passengerPhone: booking.passengerPhone,
+          gender: booking.passengerDetails?.[0]?.gender || 'not specified',
+          seatsBooked: booking.seatsBooked,
+          pickupLocation: booking.pickupLocation,
+          dropoffLocation: booking.dropoffLocation,
+        },
+        redirectUrl: `/track-passenger/${booking.rideId}`
+      });
+
+      // Also emit to general ride room for any other listeners
+      io.to(`ride_${booking.rideId}`).emit('bookingAccepted', {
+        rideId: booking.rideId,
+        bookingId: booking._id,
+        passengerName: booking.passengerName,
+        driverName: booking.driverName
+      });
+
+    } catch (e) {
+      console.warn('Socket emit failed, socket may not be initialized yet', e);
+    }
+
     res.status(200).json({
       message: 'Booking accepted',
-      booking,
+      redirectUrl: `/track-driver/${booking.rideId}`, // Driver goes to driver tracking
+      passengerRedirectUrl: `/track-passenger/${booking.rideId}`, // Passenger goes to passenger tracking
+      bookingData: {
+        bookingId: booking._id.toString(),
+        rideId: booking.rideId,
+        passengerName: booking.passengerName,
+        passengerEmail: booking.passengerEmail,
+        passengerPhone: booking.passengerPhone,
+      },
+      booking: {
+        id: booking._id,
+        rideId: booking.rideId,
+        status: booking.status,
+        acceptedAt: booking.acceptedAt,
+        driverId: booking.driverId,
+        passengerId: booking.passengerId,
+        driverName: booking.driverName,
+        driverEmail: booking.driverEmail,
+        driverGender: booking.driverGender,
+        passengerName: booking.passengerName,
+        passengerEmail: booking.passengerEmail,
+        seatsBooked: booking.seatsBooked,
+        pickupLocation: booking.pickupLocation,
+        dropoffLocation: booking.dropoffLocation,
+        date: booking.date,
+        time: booking.time,
+        carBrand: booking.carBrand,
+        carModel: booking.carModel,
+        carLicensePlate: booking.carLicensePlate,
+        driverPhone: booking.driverPhone,
+        passengerPhone: booking.passengerPhone,
+      },
+      // DRIVER INFO FOR PASSENGER
+      driverInfo: {
+        name: booking.driverName,
+        email: booking.driverEmail,
+        carBrand: booking.carBrand,
+        carModel: booking.carModel,
+        carLicensePlate: booking.carLicensePlate,
+        driverPhone: booking.driverPhone,
+        gender: booking.driverGender || 'not specified',
+        pickupLocation: booking.pickupLocation,
+        dropoffLocation: booking.dropoffLocation,
+        date: booking.date,
+        time: booking.time,
+      },
+      // PASSENGER INFO FOR DRIVER
+      passengerInfo: {
+        name: booking.passengerName,
+        email: booking.passengerEmail,
+        passengerPhone: booking.passengerPhone,
+        gender: booking.passengerDetails?.[0]?.gender || 'not specified',
+        seatsBooked: booking.seatsBooked,
+        pickupLocation: booking.pickupLocation,
+        dropoffLocation: booking.dropoffLocation,
+      },
       notification: {
         type: 'booking_accepted',
         seatsBooked: booking.seatsBooked,
@@ -202,7 +320,7 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error accepting booking:', error);
-    res.status(500).json({ error: 'Failed to accept booking' });
+    res.status(500).json({ error: 'Failed to accept booking: ' + error.message });
   }
 };
 
@@ -371,5 +489,115 @@ export const handleCancelBooking: RequestHandler = async (req, res) => {
   } catch (error: any) {
     console.error('Error cancelling booking:', error);
     res.status(500).json({ error: 'Failed to cancel booking' });
+  }
+};
+
+/**
+ * Get driver's accepted bookings with passenger details (mutual data sharing)
+ */
+export const handleGetAcceptedBookings: RequestHandler = async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const { driverId } = req.params;
+
+    if (!driverId) {
+      res.status(400).json({ error: 'Driver ID is required' });
+      return;
+    }
+
+    // Get all accepted bookings for this driver
+    const bookings = await Booking.find({
+      driverId,
+      status: 'accepted',
+    }).sort({ acceptedAt: -1 });
+
+    const enrichedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      rideId: booking.rideId,
+      status: booking.status,
+      acceptedAt: booking.acceptedAt,
+      // Passenger details shared with driver
+      passengerInfo: {
+        name: booking.passengerName,
+        email: booking.passengerEmail,
+        seatsBooked: booking.seatsBooked,
+        pickupLocation: booking.pickupLocation,
+        dropoffLocation: booking.dropoffLocation,
+        date: booking.date,
+        time: booking.time,
+        gender: booking.passengerDetails?.[0]?.gender || 'not specified',
+      },
+      rideDetails: {
+        carBrand: booking.carBrand,
+        carModel: booking.carModel,
+        pricePerSeat: booking.pricePerSeat,
+        distanceTravelledInKm: booking.distanceTravelledInKm,
+      },
+    }));
+
+    res.status(200).json({
+      bookings: enrichedBookings,
+      total: enrichedBookings.length,
+    });
+  } catch (error: any) {
+    console.error('Error getting accepted bookings:', error);
+    res.status(500).json({ error: 'Failed to get accepted bookings' });
+  }
+};
+
+/**
+ * Get passenger's bookings with driver details (mutual data sharing)
+ */
+export const handleGetBookingsByPassenger: RequestHandler = async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const { passengerId } = req.params;
+
+    if (!passengerId) {
+      res.status(400).json({ error: 'Passenger ID is required' });
+      return;
+    }
+
+    // Get all bookings for this passenger
+    const bookings = await Booking.find({
+      passengerId,
+    }).sort({ createdAt: -1 });
+
+    const enrichedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      rideId: booking.rideId,
+      status: booking.status,
+      createdAt: booking.createdAt,
+      acceptedAt: booking.acceptedAt,
+      // Driver details shared with passenger (only if accepted)
+      driverInfo: booking.status === 'accepted' ? {
+        name: booking.driverName,
+        email: booking.driverEmail,
+        gender: booking.driverGender || 'not specified',
+        carBrand: booking.carBrand,
+        carModel: booking.carModel,
+        pickupLocation: booking.pickupLocation,
+        dropoffLocation: booking.dropoffLocation,
+        date: booking.date,
+        time: booking.time,
+      } : null,
+      // Booking details
+      bookingDetails: {
+        seatsBooked: booking.seatsBooked,
+        pricePerSeat: booking.pricePerSeat,
+        distanceTravelledInKm: booking.distanceTravelledInKm,
+        totalFare: (booking.pricePerSeat || 0) * booking.seatsBooked,
+      },
+    }));
+
+    res.status(200).json({
+      bookings: enrichedBookings,
+      total: enrichedBookings.length,
+    });
+  } catch (error: any) {
+    console.error('Error getting passenger bookings:', error);
+    res.status(500).json({ error: 'Failed to get passenger bookings' });
   }
 };

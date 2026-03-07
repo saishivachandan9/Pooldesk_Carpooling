@@ -94,6 +94,17 @@ export default function RideResults({
         bookingId: data.booking.id,
       });
 
+      // join socket room for this ride to be notified of acceptance
+      import('@/lib/socket').then(({ getSocket }) => {
+        const socket = getSocket();
+        socket.emit('joinRide', { rideId: selectedRide.ride_id, userType: 'passenger' });
+        socket.on('bookingAccepted', (payload: { rideId: string }) => {
+          if (payload.rideId === selectedRide.ride_id) {
+            window.location.href = `/track-passenger/${selectedRide.ride_id}`;
+          }
+        });
+      });
+
       // Close modal after brief delay
       setTimeout(() => {
         setBookingModalOpen(false);

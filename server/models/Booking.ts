@@ -10,9 +10,13 @@ export interface IBooking extends Document {
   driverId: string;
   driverName: string;
   driverEmail: string;
+  driverGender?: string;
+  driverPhone?: string;
+  carLicensePlate?: string;
   passengerId: string;
   passengerName: string;
   passengerEmail: string;
+  passengerPhone?: string;
   seatsBooked: number;
   passengerDetails: PassengerDetail[];
   pickupLocation: string;
@@ -24,6 +28,7 @@ export interface IBooking extends Document {
   status: 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled';
   pricePerSeat?: number;
   distanceTravelledInKm?: number;
+  acceptedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +59,9 @@ const bookingSchema = new Schema(
     time: { type: String, required: true },
     carBrand: { type: String, required: true },
     carModel: { type: String, required: true },
+    carLicensePlate: { type: String },
+    driverPhone: { type: String },
+    passengerPhone: { type: String },
     status: {
       type: String,
       enum: ['pending', 'accepted', 'rejected', 'completed', 'cancelled'],
@@ -61,6 +69,8 @@ const bookingSchema = new Schema(
     },
     pricePerSeat: { type: Number },
     distanceTravelledInKm: { type: Number },
+    driverGender: { type: String },
+    acceptedAt: { type: Date },
   },
   { timestamps: true }
 );

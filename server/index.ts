@@ -20,11 +20,37 @@ import {
   handleGetBooking,
   handleGetPassengerBookings,
   handleCancelBooking,
+  handleGetAcceptedBookings,
+  handleGetBookingsByPassenger,
 } from "./routes/bookings";
+import {
+  handleGetRideDetails,
+  handleGetBookingById,
+  handleFindRidesFixed,
+  handleGetRideHistoryFixed,
+  handleGetPendingBookingsFixed,
+} from "./routes/rideDetails";
 import { calculateRealDistance } from "./utils/distance";
+import { checkActiveRide, completeRide, rateRide } from "./routes/rideManagement";
+import { getRideHistory, getDriverAnalytics, getDemandPrediction } from "./routes/analytics";
+import {
+  verifyEmployee,
+  checkVerificationStatus,
+  flagUser,
+  getVerifiedEmployees,
+  getFlaggedUsers,
+  authenticatePassengers,
+} from "./routes/verification";
+
+import { connectToDatabase } from "./db";
 
 export function createServer() {
   const app = express();
+
+  // connect to MongoDB when server initializes
+  connectToDatabase().catch(err => {
+    console.error("Failed to connect to MongoDB during server startup:", err);
+  });
 
   // Middleware
   app.use(cors());
@@ -96,6 +122,34 @@ export function createServer() {
   app.get("/api/bookings/:bookingId", handleGetBooking);
   app.get("/api/bookings/passenger/:passengerId", handleGetPassengerBookings);
   app.post("/api/bookings/:bookingId/cancel", handleCancelBooking);
+  // NEW: Mutual data sharing endpoints
+  app.get("/api/driver/:driverId/accepted-bookings", handleGetAcceptedBookings);
+  app.get("/api/passenger/:passengerId/bookings", handleGetBookingsByPassenger);
+
+  // Ride Management routes
+  app.get("/api/driver/:driverId/active-ride", checkActiveRide);
+  app.post("/api/rides/:rideId/complete", completeRide);
+  app.post("/api/ride-history/:rideHistoryId/rate", rateRide);
+
+  // NEW: Ride Details Routes (Fixed database queries)
+  app.get("/api/rides/:rideId/details", handleGetRideDetails);
+  app.get("/api/bookings/:bookingId/details", handleGetBookingById);
+  app.post("/api/rides/search/fixed", handleFindRidesFixed);
+  app.get("/api/user/:userId/ride-history/fixed", handleGetRideHistoryFixed);
+  app.get("/api/driver/:driverId/pending-bookings", handleGetPendingBookingsFixed);
+
+  // Analytics routes (fallback to fixed versions if needed)
+  app.get("/api/user/:userId/ride-history", handleGetRideHistoryFixed);
+  app.get("/api/driver/:driverId/analytics", getDriverAnalytics);
+  app.get("/api/demand-prediction", getDemandPrediction);
+
+  // Verification and Security routes
+  app.post("/api/user/:userId/verify", verifyEmployee);
+  app.get("/api/user/:userId/verification-status", checkVerificationStatus);
+  app.post("/api/user/:userId/flag", flagUser);
+  app.get("/api/company/verified-employees", getVerifiedEmployees);
+  app.get("/api/company/flagged-users", getFlaggedUsers);
+  app.post("/api/rides/:rideId/authenticate-passengers", authenticatePassengers);
 
   return app;
 }

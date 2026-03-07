@@ -4,6 +4,7 @@ import { MapPin, Car, Users, Clock, Calendar, Phone, Mail, CheckCircle, XCircle 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import DriverAcceptedBookings from "@/components/DriverAcceptedBookings";
 
 interface Ride {
   _id: string;
@@ -143,6 +144,12 @@ export default function RideOfferDetails() {
 
       const data = await response.json();
 
+      // Store accepted booking info in session for the detail page
+      if (data.booking) {
+        sessionStorage.setItem('acceptedBooking', JSON.stringify(data.booking));
+        sessionStorage.setItem('userId', ride?.driverId || '');
+      }
+
       // Refetch ride details
       const rideResponse = await fetch(`/api/rides/${notification.rideId}`);
       if (rideResponse.ok) {
@@ -154,6 +161,11 @@ export default function RideOfferDetails() {
         title: "Passenger Accepted! ✅",
         description: `${notification.passengerName} is now your passenger`,
       });
+
+      // Redirect to driver tracking page
+      setTimeout(() => {
+        navigate(`/track-driver/${notification.rideId}`);
+      }, 500);
     } catch (error) {
       console.error("Error accepting passenger:", error);
       toast({
@@ -434,6 +446,15 @@ export default function RideOfferDetails() {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Accepted Passengers Section */}
+        <div className="mt-12">
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 mb-6">
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">Accepted Passengers</h3>
+            <p className="text-gray-600">Passengers who have booked this ride</p>
+          </div>
+          <DriverAcceptedBookings driverId={ride?.driverId || "driver_temp"} />
         </div>
 
         {/* Passenger Acceptance Notification */}
