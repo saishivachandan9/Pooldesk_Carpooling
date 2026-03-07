@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
-  activeTab: "find" | "offer";
-  onTabChange: (tab: "find" | "offer") => void;
+  activeTab: "find" | "offer" | "bookings";
+  onTabChange: (tab: "find" | "offer" | "bookings") => void;
   userName: string;
   userEmail: string;
   shiftStart: string;

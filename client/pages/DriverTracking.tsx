@@ -98,6 +98,12 @@ export default function DriverTracking() {
   const [apiLoaded, setApiLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [passengerInfo, setPassengerInfo] = useState<PassengerInfo | null>(null);
+  
+  // OTP Verification States
+  const [otpInput, setOtpInput] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [isPassengerVerified, setIsPassengerVerified] = useState(false);
 
   useEffect(() => {
     const key = import.meta.env.VITE_GOOGLE_MAPS_KEY;
@@ -359,6 +365,71 @@ export default function DriverTracking() {
     }
   };
 
+  // Handle OTP verification
+  const handleVerifyPassenger = async () => {
+    if (!rideId || !otpInput.trim()) {
+      setOtpError("Please enter a 4-digit OTP");
+      return;
+    }
+
+    if (otpInput.length !== 4) {
+      setOtpError("OTP must be exactly 4 digits");
+      return;
+    }
+
+    setOtpLoading(true);
+    setOtpError(null);
+
+    try {
+      const response = await fetch(`/api/rides/${rideId}/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: otpInput }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to verify OTP");
+      }
+
+      const data = await response.json();
+      if (data.verified) {
+        setIsPassengerVerified(true);
+        setOtpInput('');
+        setOtpError(null);
+        console.log("✓ Passenger verified successfully!");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Invalid OTP, please try again";
+      setOtpError(errorMessage);
+      console.error("OTP verification error:", error);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleCompleteRide = async () => {
+    if (!rideId) return;
+
+    try {
+      const response = await fetch(`/api/rides/${rideId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to complete ride");
+      }
+
+      alert("✓ Ride completed successfully!");
+      // Redirect to dashboard or history
+      window.location.href = "/driver-dashboard";
+    } catch (error) {
+      console.error("Error completing ride:", error);
+      alert("Failed to complete ride. Please try again.");
+    }
+  };
+
   return (
     <div className="w-full h-screen flex flex-col relative">
       <div id="map" className="w-full flex-1" />
@@ -373,6 +444,7 @@ export default function DriverTracking() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* Passenger Basic Info */}
             <div className="flex items-center justify-between">
               <span className="font-medium text-gray-700">Name:</span>
               <span className="text-gray-900">{passengerInfo.name}</span>
@@ -396,6 +468,7 @@ export default function DriverTracking() {
               <span className="text-gray-900">{passengerInfo.seatsBooked}</span>
             </div>
 
+            {/* Route Details */}
             <div className="pt-2 border-t">
               <div className="flex items-start gap-2 text-sm text-gray-600">
                 <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -406,6 +479,74 @@ export default function DriverTracking() {
               </div>
             </div>
 
+            {/* OTP Verification Section - Show only if not verified */}
+            {!isPassengerVerified && (
+              <div className="pt-3 border-t space-y-2">
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
+                  <label className="text-sm font-semibold text-orange-900 block">
+                    🔐 Verify Passenger
+                  </label>
+                  <p className="text-xs text-orange-800">
+                    Enter the 4-digit OTP to verify the passenger has boarded.
+                  </p>
+                  
+                  {/* OTP Input */}
+                  <input
+                    type="text"
+                    value={otpInput}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setOtpInput(value);
+                      if (otpError) setOtpError(null);
+                    }}
+                    placeholder="0000"
+                    maxLength={4}
+                    className="w-full px-3 py-2 border border-orange-300 rounded-md text-center text-2xl font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+
+                  {/* Error Message */}
+                  {otpError && (
+                    <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                      ❌ {otpError}
+                    </div>
+                  )}
+
+                  {/* Verify Button */}
+                  <Button
+                    onClick={handleVerifyPassenger}
+                    disabled={otpLoading || otpInput.length !== 4}
+                    className="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold"
+                  >
+                    {otpLoading ? "Verifying..." : "Verify Passenger"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Verification Success Badge - Show only if verified */}
+            {isPassengerVerified && (
+              <div className="pt-3 border-t space-y-2">
+                <div className="bg-green-50 border border-green-300 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-green-700">
+                    <span className="text-lg">✅</span>
+                    Passenger Verified
+                  </div>
+                  <p className="text-xs text-green-800">
+                    Passenger identity confirmed and ride in progress.
+                  </p>
+
+                  {/* Complete Ride Button */}
+                  <Button
+                    onClick={handleCompleteRide}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold mt-2"
+                  >
+                    ✓ Complete Ride
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Phone Number Display */}
             <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
               📞 {passengerInfo.passengerPhone}
             </div>

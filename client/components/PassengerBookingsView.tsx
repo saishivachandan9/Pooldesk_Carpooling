@@ -48,6 +48,17 @@ export default function PassengerBookingsView({ passengerId }: PassengerBookings
     fetchBookings();
   }, [passengerId]);
 
+  // ✅ ADD POLLING FOR NEWLY ACCEPTED BOOKINGS
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      if (!loading) {
+        fetchBookings();
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [passengerId, loading]);
+
   // Socket.io listener for booking acceptance notifications
   useEffect(() => {
     if (!passengerId) return;
@@ -57,15 +68,40 @@ export default function PassengerBookingsView({ passengerId }: PassengerBookings
       const { getSocket } = await import('@/lib/socket');
       socket = getSocket();
 
-      // join a room per booking so we only get updates for rides we care about
+      console.log('🔌 Setting up socket for passenger:', passengerId);
+
+      // Join passenger room for this passenger (to receive booking notifications)
+      socket.emit('joinPassenger', { passengerId });
+      console.log('📡 Emitted joinPassenger event for passenger:', passengerId);
+
+      // Also join ride rooms for existing bookings
       bookings.forEach(b => {
         socket.emit('joinRide', { rideId: b.rideId, userType: 'passenger', userId: passengerId });
       });
 
-      socket.on('bookingAccepted', (data: { rideId: string }) => {
+      socket.on('bookingAccepted', (data: { rideId: string; driverInfo?: any; otp?: string }) => {
         if (!data || !data.rideId) return;
-        if (window.location.pathname !== `/track-passenger/${data.rideId}`) {
-          window.location.href = `/track-passenger/${data.rideId}`;
+
+        console.log('🎉 Booking accepted received:', data);
+        console.log('🔍 Current location:', window.location.pathname);
+
+        // ✓ STORE OTP AND DRIVER INFO IN LOCALSTORAGE FOR PASSENGER TRACKING PAGE
+        if (data.otp || data.driverInfo) {
+          const bookingData = {
+            rideId: data.rideId,
+            driverInfo: data.driverInfo,
+            otp: data.otp,
+            timestamp: Date.now(),
+          };
+          localStorage.setItem(`booking_${data.rideId}`, JSON.stringify(bookingData));
+          console.log('✓ Booking data stored:', bookingData);
+        }
+
+        // ✅ FORCE REDIRECT TO TRACKING PAGE
+        const trackingUrl = `/track-passenger/${data.rideId}`;
+        if (window.location.pathname !== trackingUrl) {
+          console.log('🔄 Redirecting to:', trackingUrl);
+          window.location.href = trackingUrl;
         }
       });
     };
@@ -92,7 +128,95 @@ export default function PassengerBookingsView({ passengerId }: PassengerBookings
       }
 
       const data = await response.json();
-      setBookings(data.bookings || []);
+      const newBookings = data.bookings || [];
+      
+      // ✅ CHECK FOR NEWLY ACCEPTED BOOKINGS WITH OTP VIA DEDICATED ENDPOINT
+      try {
+        const acceptedResponse = await fetch(`/api/passenger/${passengerId}/accepted-bookings`);
+        if (acceptedResponse.ok) {
+          const acceptedData = await acceptedResponse.json();
+          const acceptedBookings = acceptedData.acceptedBookings || [];
+          
+          // Find newly accepted bookings (not in current state)
+          const newlyAcceptedBooking = acceptedBookings.find((accepted: any) => 
+            !bookings.some(existing => existing.rideId === accepted.rideId && existing.status === 'accepted')
+          );
+          
+          if (newlyAcceptedBooking) {
+            console.log('🎉 Newly accepted booking found via polling:', newlyAcceptedBooking);
+            
+            // Store complete booking data with OTP
+            const bookingData = {
+              rideId: newlyAcceptedBooking.rideId,
+              driverInfo: newlyAcceptedBooking.driverInfo,
+              passengerInfo: newlyAcceptedBooking.passengerInfo,
+              otp: newlyAcceptedBooking.otp,
+              timestamp: Date.now(),
+            };
+            localStorage.setItem(`booking_${newlyAcceptedBooking.rideId}`, JSON.stringify(bookingData));
+            console.log('✓ Booking data stored via polling:', bookingData);
+            
+            // Redirect to tracking page
+            const trackingUrl = `/track-passenger/${newlyAcceptedBooking.rideId}`;
+            if (window.location.pathname !== trackingUrl) {
+              console.log('🔄 Redirecting to tracking page via polling:', trackingUrl);
+              window.location.href = trackingUrl;
+              return; // Don't update state if redirecting
+            }
+          }
+        }
+      } catch (acceptedError) {
+        console.error('Failed to check accepted bookings:', acceptedError);
+        // Fallback to old method if new endpoint fails
+        const newlyAcceptedBooking = newBookings.find((b: any) => 
+          b.status === 'accepted' && !bookings.some(existing => existing._id === b._id)
+        );
+        
+        if (newlyAcceptedBooking) {
+          console.log('🎉 Newly accepted booking found (fallback):', newlyAcceptedBooking);
+          
+          // Fetch OTP from the ride
+          try {
+            const rideResponse = await fetch(`/api/rides/${newlyAcceptedBooking.rideId}`);
+            const rideData = await rideResponse.json();
+            
+            if (rideData.otp) {
+              const bookingData = {
+                rideId: newlyAcceptedBooking.rideId,
+                driverInfo: {
+                  name: newlyAcceptedBooking.driverName,
+                  email: newlyAcceptedBooking.driverEmail,
+                  carBrand: newlyAcceptedBooking.carBrand,
+                  carModel: newlyAcceptedBooking.carModel,
+                  carLicensePlate: newlyAcceptedBooking.carLicensePlate,
+                  driverPhone: newlyAcceptedBooking.driverPhone,
+                  gender: newlyAcceptedBooking.driverGender || 'not specified',
+                  pickupLocation: newlyAcceptedBooking.pickupLocation,
+                  dropoffLocation: newlyAcceptedBooking.dropoffLocation,
+                  date: newlyAcceptedBooking.date,
+                  time: newlyAcceptedBooking.time,
+                },
+                otp: rideData.otp,
+                timestamp: Date.now(),
+              };
+              localStorage.setItem(`booking_${newlyAcceptedBooking.rideId}`, JSON.stringify(bookingData));
+              console.log('✓ Booking data stored via polling (fallback):', bookingData);
+              
+              // Redirect to tracking page
+              const trackingUrl = `/track-passenger/${newlyAcceptedBooking.rideId}`;
+              if (window.location.pathname !== trackingUrl) {
+                console.log('🔄 Redirecting to tracking page via polling (fallback):', trackingUrl);
+                window.location.href = trackingUrl;
+                return; // Don't update state if redirecting
+              }
+            }
+          } catch (otpError) {
+            console.error('Failed to fetch OTP (fallback):', otpError);
+          }
+        }
+      }
+      
+      setBookings(newBookings);
     } catch (err) {
       console.error("Fetch error:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch your bookings");

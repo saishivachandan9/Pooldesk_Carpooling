@@ -22,7 +22,7 @@ interface RideMatch {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<"find" | "offer">("find");
+  const [activeTab, setActiveTab] = useState<"find" | "offer" | "bookings">("find");
   const { toast } = useToast();
   const [isOfferingRide, setIsOfferingRide] = useState(false);
 

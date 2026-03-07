@@ -33,6 +33,11 @@ export default function PassengerTracking() {
   const pickupMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const [apiLoaded, setApiLoaded] = useState(false);
   const [driverInfo, setDriverInfo] = useState<DriverInfo | null>(null);
+  
+  // OTP and Ride Status States
+  const [otp, setOtp] = useState<string | null>(null);
+  const [rideStatus, setRideStatus] = useState<'waiting' | 'in_progress' | 'completed'>('waiting');
+  const [isRideStarted, setIsRideStarted] = useState(false);
 
 interface DriverInfo {
   name: string;
@@ -55,19 +60,26 @@ interface DriverInfo {
       .catch(console.error);
   }, []);
 
-  // Extract driver info from location state, localStorage, or fetch from API
+  // Extract driver info and OTP from location state, localStorage, or fetch from API
   useEffect(() => {
     if (!rideId) return;
 
-    // First, try to get driver info from location state (passed from booking acceptance)
+    // First, try to get driver info and OTP from location state (passed from booking acceptance)
     const state = location.state as any;
     if (state?.driverInfo) {
       setDriverInfo(state.driverInfo);
       console.log("✓ Driver info loaded from location state:", state.driverInfo);
-      return;
+      
+      // Also check for OTP in location state
+      if (state?.otp) {
+        setOtp(state.otp);
+        setRideStatus('waiting');
+        console.log("✓ OTP loaded from location state:", state.otp);
+        return;
+      }
     }
 
-    // Second, try to get from localStorage (set by socket notification)
+    // Second, try localStorage (set by socket event or polling)
     const storedBooking = localStorage.getItem(`booking_${rideId}`);
     if (storedBooking) {
       try {
@@ -75,6 +87,67 @@ interface DriverInfo {
         if (bookingData.driverInfo && (Date.now() - bookingData.timestamp) < 3600000) { // 1 hour expiry
           setDriverInfo(bookingData.driverInfo);
           console.log("✓ Driver info loaded from localStorage:", bookingData.driverInfo);
+          
+          // ✅ EXTRACT OTP FROM LOCALSTORAGE
+          if (bookingData.otp) {
+            setOtp(bookingData.otp);
+            setRideStatus('waiting');
+            console.log("✓ OTP loaded from localStorage:", bookingData.otp);
+            return; // Got everything, done!
+          }
+        } else {
+          // Expired data, remove it
+          localStorage.removeItem(`booking_${rideId}`);
+        }
+      } catch (error) {
+        console.error("Error parsing stored booking data:", error);
+        localStorage.removeItem(`booking_${rideId}`);
+      }
+    }
+
+    // Third, fetch from API as fallback
+    fetchDriverInfoAndOtp();
+  }, [rideId, location.state]);
+
+  // Fetch OTP from API
+  const fetchOtpFromApi = async () => {
+    if (!rideId) return;
+    try {
+      const response = await fetch(`/api/rides/${rideId}`);
+      const ride = await response.json();
+      if (ride?.otp) {
+        setOtp(ride.otp);
+        setRideStatus('waiting');
+        console.log("✓ OTP fetched from API:", ride.otp);
+      }
+    } catch (error) {
+      console.error("Failed to fetch OTP:", error);
+    }
+  };
+
+  // Fetch both driver info and OTP
+  const fetchDriverInfoAndOtp = async () => {
+    if (!rideId) return;
+    
+    // Try to get from localStorage (set by socket notification)
+    const storedBooking = localStorage.getItem(`booking_${rideId}`);
+    if (storedBooking) {
+      try {
+        const bookingData = JSON.parse(storedBooking);
+        if (bookingData.driverInfo && (Date.now() - bookingData.timestamp) < 3600000) { // 1 hour expiry
+          setDriverInfo(bookingData.driverInfo);
+          console.log("✓ Driver info loaded from localStorage:", bookingData.driverInfo);
+          
+          // ✓ EXTRACT OTP FROM LOCALSTORAGE
+          if (bookingData.otp) {
+            setOtp(bookingData.otp);
+            setRideStatus('waiting');
+            console.log("✓ OTP loaded from localStorage:", bookingData.otp);
+            return; // Don't call API if we have everything from localStorage
+          }
+          
+          // If no OTP in storage, fetch from API
+          fetchOtpFromApi();
           return;
         } else {
           // Expired data, remove it
@@ -87,39 +160,44 @@ interface DriverInfo {
     }
 
     // Fallback: Fetch driver info from API
-    const fetchDriverInfo = async () => {
-      try {
-        const response = await fetch(`/api/rides/${rideId}/details`);
-        const data = await response.json();
+    try {
+      const response = await fetch(`/api/rides/${rideId}/details`);
+      const data = await response.json();
 
-        if (data.bookings && data.bookings.length > 0) {
-          // Find the accepted booking
-          const acceptedBooking = data.bookings.find((b: any) => b.status === 'accepted');
-          if (acceptedBooking) {
-            const driverData = {
-              name: acceptedBooking.driverName,
-              email: acceptedBooking.driverEmail,
-              carBrand: acceptedBooking.carBrand,
-              carModel: acceptedBooking.carModel,
-              carLicensePlate: acceptedBooking.carLicensePlate,
-              driverPhone: acceptedBooking.driverPhone,
-              gender: acceptedBooking.driverGender || 'not specified',
-              pickupLocation: acceptedBooking.pickupLocation,
-              dropoffLocation: acceptedBooking.dropoffLocation,
-              date: acceptedBooking.date,
-              time: acceptedBooking.time,
-            };
-            setDriverInfo(driverData);
-            console.log("✓ Driver info loaded from API:", driverData);
-          }
+      if (data.bookings && data.bookings.length > 0) {
+        // Find the accepted booking
+        const acceptedBooking = data.bookings.find((b: any) => b.status === 'accepted');
+        if (acceptedBooking) {
+          const driverData = {
+            name: acceptedBooking.driverName,
+            email: acceptedBooking.driverEmail,
+            carBrand: acceptedBooking.carBrand,
+            carModel: acceptedBooking.carModel,
+            carLicensePlate: acceptedBooking.carLicensePlate,
+            driverPhone: acceptedBooking.driverPhone,
+            gender: acceptedBooking.driverGender || 'not specified',
+            pickupLocation: acceptedBooking.pickupLocation,
+            dropoffLocation: acceptedBooking.dropoffLocation,
+            date: acceptedBooking.date,
+            time: acceptedBooking.time,
+          };
+          setDriverInfo(driverData);
+          console.log("✓ Driver info loaded from API:", driverData);
         }
-      } catch (error) {
-        console.error("Failed to fetch driver info:", error);
       }
-    };
-
-    fetchDriverInfo();
-  }, [rideId, location.state]);
+      
+      // Also fetch OTP from the ride API
+      const rideResponse = await fetch(`/api/rides/${rideId}`);
+      const ride = await rideResponse.json();
+      if (ride?.otp) {
+        setOtp(ride.otp);
+        setRideStatus('waiting');
+        console.log("✓ OTP fetched from API:", ride.otp);
+      }
+    } catch (error) {
+      console.error("Failed to fetch driver info or OTP:", error);
+    }
+  };
 
   useEffect(() => {
     if (!apiLoaded || !rideId) return;
@@ -206,6 +284,24 @@ interface DriverInfo {
       }
     });
 
+    // Listen for ride start event (when driver verifies OTP)
+    socket.on('rideStarted', (data: any) => {
+      console.log('🚀 Ride started event received:', data);
+      setIsRideStarted(true);
+      setRideStatus('in_progress');
+    });
+
+    // Listen for ride status updates
+    socket.on('rideStatusUpdate', (data: any) => {
+      console.log('Ride status update:', data);
+      if (data.status === 'in_progress') {
+        setIsRideStarted(true);
+        setRideStatus('in_progress');
+      } else if (data.status === 'completed') {
+        setRideStatus('completed');
+      }
+    });
+
     const watchId = navigator.geolocation.watchPosition(
       pos => {
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -221,6 +317,8 @@ interface DriverInfo {
     return () => {
       socket.off('driverLocation');
       socket.off('bookingAccepted');
+      socket.off('rideStarted');
+      socket.off('rideStatusUpdate');
       navigator.geolocation.clearWatch(watchId);
     };
   }, [apiLoaded, rideId]);
@@ -228,6 +326,66 @@ interface DriverInfo {
   return (
     <div className="w-full h-screen flex flex-col relative">
       <div id="map" className="w-full flex-1" />
+
+      {/* OTP Display Card - Floating on top left when ride is waiting */}
+      {otp && !isRideStarted && rideStatus === 'waiting' && (
+        <Card className="absolute top-4 left-4 w-96 bg-gradient-to-br from-blue-50 to-blue-100 backdrop-blur-sm shadow-2xl border-2 border-blue-400 z-20 animate-pulse">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-blue-700">
+              🔐 SHARE THIS PIN WITH YOUR DRIVER
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Large OTP Display */}
+            <div className="bg-white rounded-xl p-6 border-2 border-blue-300 shadow-md">
+              <p className="text-xs text-gray-600 uppercase font-bold tracking-wide mb-2">
+                Your Ride PIN
+              </p>
+              <div className="text-6xl font-black text-center text-blue-600 tracking-widest font-mono">
+                {otp}
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <div className="bg-blue-50 rounded-lg p-3 space-y-1">
+              <p className="text-sm font-semibold text-blue-900">How to use:</p>
+              <ol className="text-xs text-blue-800 space-y-1 list-decimal list-inside">
+                <li>Share this 4-digit PIN with your driver</li>
+                <li>Driver enters PIN on their screen to verify</li>
+                <li>Ride starts once PIN is verified ✓</li>
+              </ol>
+            </div>
+
+            {/* Status Indicator */}
+            <div className="flex items-center justify-center gap-2 text-sm text-blue-700 font-semibold bg-blue-100 rounded-lg py-2">
+              <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span>
+              Waiting for driver to verify...
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Ride Started Badge - Replace OTP with this when ride starts */}
+      {isRideStarted && rideStatus === 'in_progress' && (
+        <Card className="absolute top-4 left-4 w-80 bg-gradient-to-br from-green-50 to-green-100 backdrop-blur-sm shadow-lg border-2 border-green-400 z-20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2 text-green-700">
+              <span className="text-2xl">✓</span>
+              Ride in Progress
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="bg-green-50 rounded-lg p-3">
+              <p className="text-sm text-green-800 font-semibold">
+                🚗 Driver verified your PIN
+              </p>
+              <p className="text-xs text-green-700 mt-2">
+                Your ride has started. Sit back and enjoy!
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Driver Contact Card - Floating on top right */}
       {driverInfo && (

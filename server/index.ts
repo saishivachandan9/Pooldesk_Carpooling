@@ -22,6 +22,7 @@ import {
   handleCancelBooking,
   handleGetAcceptedBookings,
   handleGetBookingsByPassenger,
+  handleCheckAcceptedBookings,
 } from "./routes/bookings";
 import {
   handleGetRideDetails,
@@ -31,7 +32,7 @@ import {
   handleGetPendingBookingsFixed,
 } from "./routes/rideDetails";
 import { calculateRealDistance } from "./utils/distance";
-import { checkActiveRide, completeRide, rateRide } from "./routes/rideManagement";
+import { checkActiveRide, completeRide, startRide, verifyRideOtp, rateRide } from "./routes/rideManagement";
 import { getRideHistory, getDriverAnalytics, getDemandPrediction } from "./routes/analytics";
 import {
   verifyEmployee,
@@ -125,9 +126,12 @@ export function createServer() {
   // NEW: Mutual data sharing endpoints
   app.get("/api/driver/:driverId/accepted-bookings", handleGetAcceptedBookings);
   app.get("/api/passenger/:passengerId/bookings", handleGetBookingsByPassenger);
+  app.get("/api/passenger/:passengerId/accepted-bookings", handleCheckAcceptedBookings);
 
   // Ride Management routes
   app.get("/api/driver/:driverId/active-ride", checkActiveRide);
+  app.post("/api/rides/:rideId/start", startRide);
+  app.post("/api/rides/:rideId/verify-otp", verifyRideOtp);
   app.post("/api/rides/:rideId/complete", completeRide);
   app.post("/api/ride-history/:rideHistoryId/rate", rateRide);
 

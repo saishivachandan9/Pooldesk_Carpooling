@@ -1,5 +1,6 @@
 import { DemoResponse } from "@shared/api";
 import { useEffect, useState } from "react";
+import FareCalculator from "@/components/FareCalculator";
 
 export default function Index() {
   const [exampleFromServer, setExampleFromServer] = useState("");
@@ -19,42 +20,50 @@ export default function Index() {
     }
   };
 
+  const handleFareCalculated = (fare: number, distance: number, time: number) => {
+    console.log(`Fare calculated: ₹${fare} for ${distance.toFixed(1)}km, ${time.toFixed(0)}mins`);
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
-      <div className="text-center">
-        {/* TODO: FUSION_GENERATION_APP_PLACEHOLDER replace everything here with the actual app! */}
-        <h1 className="text-2xl font-semibold text-slate-800 flex items-center justify-center gap-3">
-          <svg
-            className="animate-spin h-8 w-8 text-slate-400"
-            viewBox="0 0 50 50"
-          >
-            <circle
-              className="opacity-30"
-              cx="25"
-              cy="25"
-              r="20"
-              stroke="currentColor"
-              strokeWidth="5"
-              fill="none"
-            />
-            <circle
-              className="text-slate-600"
-              cx="25"
-              cy="25"
-              r="20"
-              stroke="currentColor"
-              strokeWidth="5"
-              fill="none"
-              strokeDasharray="100"
-              strokeDashoffset="75"
-            />
-          </svg>
-          Generating your app...
-        </h1>
-        <p className="mt-4 text-slate-600 max-w-md">
-          Watch the chat on the left for updates that might need your attention
-          to finish generating
-        </p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-4">
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">
+            🚗 Pooldesk - Carpooling App
+          </h1>
+          <p className="text-slate-600">
+            Dynamic fare calculation based on ride distance
+          </p>
+        </div>
+
+        {/* Fare Calculator Demo */}
+        <FareCalculator onFareCalculated={handleFareCalculated} />
+
+        {/* Info Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="font-semibold text-lg mb-2">📏 Distance-Based</h3>
+            <p className="text-gray-600 text-sm">
+              Fare changes based ONLY on pickup to destination distance. Driver's route to pickup is never charged.
+            </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="font-semibold text-lg mb-2">💰 Dynamic Pricing</h3>
+            <p className="text-gray-600 text-sm">
+              ₹50 base fare + ₹8 per km. Matches actual booking prices with minimum ₹50 fare.
+            </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="font-semibold text-lg mb-2">🗺️ Real Routes</h3>
+            <p className="text-gray-600 text-sm">
+              Uses Google Maps Directions API for actual driving distances, not straight-line measurements.
+            </p>
+          </div>
+        </div>
+
         <p className="mt-4 hidden max-w-md">{exampleFromServer}</p>
       </div>
     </div>

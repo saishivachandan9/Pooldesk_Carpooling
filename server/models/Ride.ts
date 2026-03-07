@@ -17,7 +17,8 @@ export interface IRide extends Document {
   availableSeats: number;
   bookedSeats: number;
   passengerPreference: string;
-  status: 'active' | 'completed' | 'cancelled';
+  status: 'active' | 'in_progress' | 'completed' | 'cancelled';
+  otp?: string;
   acceptedBookings: string[]; // Array of booking IDs that have been accepted
   distanceTravelledInKm: number; // Estimated distance in kilometers
   pricePerSeat: number; // Price per seat in rupees
@@ -52,8 +53,12 @@ const rideSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'completed', 'cancelled'],
+      enum: ['active', 'in_progress', 'completed', 'cancelled'],
       default: 'active',
+    },
+    otp: {
+      type: String,
+      required: false,
     },
     acceptedBookings: [{ type: String, default: [] }],
     distanceTravelledInKm: { type: Number, required: true, min: 0 },

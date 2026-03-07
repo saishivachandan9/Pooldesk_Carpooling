@@ -34,7 +34,7 @@ interface ActiveRideData {
   date: string;
   time: string;
   seatsBooked?: number;
-  status: "active" | "completed" | "cancelled";
+  status: "active" | "in_progress" | "completed" | "cancelled";
 }
 
 interface LocationData {
@@ -59,6 +59,13 @@ export default function ActiveRide() {
   const [otherLocation, setOtherLocation] = useState<LocationData | null>(null);
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+
+  // OTP and ride status
+  const [rideStatus, setRideStatus] = useState<'active' | 'in_progress' | 'completed' | 'cancelled'>('active');
+  const [otp, setOtp] = useState('');
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [startingRide, setStartingRide] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
 
   // Fetch ride data
   useEffect(() => {
@@ -95,6 +102,14 @@ export default function ActiveRide() {
 
         ride.userType = userType;
         setRideData(ride);
+        setRideStatus(ride.status || 'active');
+        
+        // If ride is in progress and user is passenger, check if OTP is verified
+        if (ride.status === 'in_progress' && userType === 'passenger') {
+          // Check if OTP was already verified (you might want to store this in localStorage or check with backend)
+          const verified = localStorage.getItem(`otp_verified_${rideId}`);
+          setOtpVerified(verified === 'true');
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "Unknown error occurred";
         setError(errorMsg);
@@ -253,6 +268,61 @@ export default function ActiveRide() {
     }
   };
 
+  const handleStartRide = async () => {
+    if (!rideId) return;
+    
+    try {
+      setStartingRide(true);
+      const response = await fetch(`/api/rides/${rideId}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to start ride");
+      }
+
+      const data = await response.json();
+      setRideStatus('in_progress');
+      alert(`Ride started! OTP: ${data.otp}`);
+    } catch (error) {
+      console.error("Error starting ride:", error);
+      alert("Failed to start ride. Please try again.");
+    } finally {
+      setStartingRide(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!rideId || !otp) return;
+    
+    try {
+      setVerifyingOtp(true);
+      const response = await fetch(`/api/rides/${rideId}/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to verify OTP");
+      }
+
+      const data = await response.json();
+      if (data.verified) {
+        setOtpVerified(true);
+        localStorage.setItem(`otp_verified_${rideId}`, 'true');
+        alert("OTP verified! Ride has started.");
+      }
+    } catch (error) {
+      console.error("Error verifying OTP:", error);
+      alert(error instanceof Error ? error.message : "Failed to verify OTP. Please try again.");
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -298,8 +368,19 @@ export default function ActiveRide() {
 
         {/* Status Badge */}
         <div className="mb-6">
-          <Badge className="bg-green-500 text-white px-4 py-2 text-base">
-            ✓ Ride Active • Tracking Enabled
+          <Badge className={`px-4 py-2 text-base ${
+            rideStatus === 'in_progress' 
+              ? 'bg-blue-500 text-white' 
+              : rideStatus === 'completed'
+              ? 'bg-gray-500 text-white'
+              : 'bg-green-500 text-white'
+          }`}>
+            {rideStatus === 'in_progress' 
+              ? '🚗 Ride In Progress' 
+              : rideStatus === 'completed'
+              ? '✅ Ride Completed'
+              : '✓ Ride Active • Ready to Start'
+            }
           </Badge>
         </div>
 
@@ -370,7 +451,17 @@ export default function ActiveRide() {
                     </Button>
                   )}
 
-                  {rideData.userType === "driver" && (
+                  {rideData.userType === "driver" && rideStatus === 'active' && (
+                    <Button
+                      onClick={handleStartRide}
+                      disabled={startingRide}
+                      className="flex-1 bg-green-600 hover:bg-green-700"
+                    >
+                      {startingRide ? 'Starting...' : 'Start Ride'}
+                    </Button>
+                  )}
+
+                  {rideData.userType === "driver" && rideStatus === 'in_progress' && (
                     <Button
                       onClick={handleCompleteRide}
                       className="flex-1 bg-blue-600 hover:bg-blue-700"
@@ -488,6 +579,55 @@ export default function ActiveRide() {
                       {rideData.passengerEmail}
                     </a>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* OTP Verification for Passengers */}
+            {rideData.userType === "passenger" && rideStatus === 'in_progress' && !otpVerified && (
+              <Card className="border-2 border-orange-200 bg-orange-50">
+                <CardHeader>
+                  <CardTitle className="text-lg text-orange-900 flex items-center gap-2">
+                    🔐 Verify Ride Start
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-orange-800">
+                    The driver has started the ride. Please enter the 4-digit OTP shared by your driver to verify and begin tracking.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="Enter 4-digit OTP"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      maxLength={4}
+                    />
+                    <Button
+                      onClick={handleVerifyOtp}
+                      disabled={verifyingOtp || otp.length !== 4}
+                      className="bg-orange-600 hover:bg-orange-700"
+                    >
+                      {verifyingOtp ? 'Verifying...' : 'Verify'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Ride Started Confirmation for Passengers */}
+            {rideData.userType === "passenger" && rideStatus === 'in_progress' && otpVerified && (
+              <Card className="border-2 border-green-200 bg-green-50">
+                <CardHeader>
+                  <CardTitle className="text-lg text-green-900 flex items-center gap-2">
+                    ✅ Ride Started
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-green-800">
+                    OTP verified! The ride has started and tracking is now active.
+                  </p>
                 </CardContent>
               </Card>
             )}

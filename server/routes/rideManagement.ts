@@ -98,6 +98,70 @@ export const completeRide: RequestHandler = async (req, res) => {
   }
 };
 
+// Start a ride - generate OTP and set status to in_progress
+export const startRide: RequestHandler = async (req, res) => {
+  try {
+    const { rideId } = req.params;
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    if (ride.status !== 'active') {
+      return res.status(400).json({ error: "Ride is not in active status" });
+    }
+
+    // Generate 4-digit OTP
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Update ride status and OTP
+    ride.status = 'in_progress';
+    ride.otp = otp;
+    await ride.save();
+
+    res.json({
+      message: "Ride started successfully",
+      rideId: ride._id,
+      otp: otp,
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+};
+
+// Verify OTP for ride start
+export const verifyRideOtp: RequestHandler = async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const { otp } = req.body;
+
+    if (!otp) {
+      return res.status(400).json({ error: "OTP is required" });
+    }
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    if (ride.status !== 'in_progress') {
+      return res.status(400).json({ error: "Ride is not in progress" });
+    }
+
+    if (ride.otp !== otp) {
+      return res.status(400).json({ error: "Invalid OTP" });
+    }
+
+    res.json({
+      message: "OTP verified successfully",
+      verified: true,
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+};
+
 // Rate a completed ride
 export const rateRide: RequestHandler = async (req, res) => {
   try {

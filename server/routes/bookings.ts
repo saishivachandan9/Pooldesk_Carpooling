@@ -191,6 +191,11 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       }
       ride.acceptedBookings.push(bookingId.toString());
 
+      // Generate 4-digit OTP for this ride
+      const otp = String(Math.floor(Math.random() * 9000) + 1000); // Generates 1000-9999
+      ride.otp = otp;
+      console.log(`✓ OTP generated for ride ${booking.rideId}: ${otp}`);
+
       // If no more seats available, mark as completed
       if (ride.availableSeats === 0) {
         ride.status = 'completed';
@@ -205,10 +210,13 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       const { getIo } = await import('../socket');
       const io = getIo();
 
-      // Notify passenger via socket with detailed acceptance info
-      io.to(`passenger_${booking.rideId}`).emit('bookingAccepted', {
+      console.log(`📡 Emitting bookingAccepted to passenger_${booking.passengerId} for ride ${booking.rideId}`);
+
+      // Notify passenger via socket with detailed acceptance info + OTP
+      io.to(`passenger_${booking.passengerId}`).emit('bookingAccepted', {
         rideId: booking.rideId,
         passengerId: booking.passengerId,
+        otp: ride?.otp, // ✓ INCLUDE OTP IN SOCKET EVENT
         driverInfo: {
           name: booking.driverName,
           email: booking.driverEmail,
@@ -234,6 +242,8 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
         redirectUrl: `/track-passenger/${booking.rideId}`
       });
 
+      console.log(`✅ Socket event emitted with OTP: ${ride?.otp}`);
+
       // Also emit to general ride room for any other listeners
       io.to(`ride_${booking.rideId}`).emit('bookingAccepted', {
         rideId: booking.rideId,
@@ -250,12 +260,14 @@ export const handleAcceptBooking: RequestHandler = async (req, res) => {
       message: 'Booking accepted',
       redirectUrl: `/track-driver/${booking.rideId}`, // Driver goes to driver tracking
       passengerRedirectUrl: `/track-passenger/${booking.rideId}`, // Passenger goes to passenger tracking
+      otp: ride?.otp, // ✓ INCLUDE OTP IN RESPONSE
       bookingData: {
         bookingId: booking._id.toString(),
         rideId: booking.rideId,
         passengerName: booking.passengerName,
         passengerEmail: booking.passengerEmail,
         passengerPhone: booking.passengerPhone,
+        otp: ride?.otp, // ✓ ALSO HERE FOR CONVENIENCE
       },
       booking: {
         id: booking._id,
@@ -599,5 +611,72 @@ export const handleGetBookingsByPassenger: RequestHandler = async (req, res) => 
   } catch (error: any) {
     console.error('Error getting passenger bookings:', error);
     res.status(500).json({ error: 'Failed to get passenger bookings' });
+  }
+};
+
+/**
+ * Check for newly accepted bookings with OTP (for polling fallback)
+ */
+export const handleCheckAcceptedBookings: RequestHandler = async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const { passengerId } = req.params;
+
+    if (!passengerId) {
+      res.status(400).json({ error: 'Passenger ID is required' });
+      return;
+    }
+
+    // Get all accepted bookings for this passenger that have OTP
+    const acceptedBookings = await Booking.find({
+      passengerId,
+      status: 'accepted',
+    }).sort({ acceptedAt: -1 });
+
+    // Enrich with OTP from ride
+    const enrichedBookings = [];
+    for (const booking of acceptedBookings) {
+      const ride = await Ride.findById(booking.rideId);
+      if (ride && ride.otp) {
+        enrichedBookings.push({
+          bookingId: booking._id,
+          rideId: booking.rideId,
+          otp: ride.otp,
+          driverInfo: {
+            name: booking.driverName,
+            email: booking.driverEmail,
+            carBrand: booking.carBrand,
+            carModel: booking.carModel,
+            carLicensePlate: booking.carLicensePlate,
+            driverPhone: booking.driverPhone,
+            gender: booking.driverGender || 'not specified',
+            pickupLocation: booking.pickupLocation,
+            dropoffLocation: booking.dropoffLocation,
+            date: booking.date,
+            time: booking.time,
+          },
+          passengerInfo: {
+            name: booking.passengerName,
+            email: booking.passengerEmail,
+            passengerPhone: booking.passengerPhone,
+            gender: booking.passengerDetails?.[0]?.gender || 'not specified',
+            seatsBooked: booking.seatsBooked,
+            pickupLocation: booking.pickupLocation,
+            dropoffLocation: booking.dropoffLocation,
+          },
+          acceptedAt: booking.acceptedAt,
+          redirectUrl: `/track-passenger/${booking.rideId}`
+        });
+      }
+    }
+
+    res.status(200).json({
+      acceptedBookings: enrichedBookings,
+      total: enrichedBookings.length,
+    });
+  } catch (error: any) {
+    console.error('Error checking accepted bookings:', error);
+    res.status(500).json({ error: 'Failed to check accepted bookings' });
   }
 };

@@ -23,6 +23,14 @@ export function initSocketServer(httpServer: http.Server) {
       console.log(`socket ${socket.id} joined rooms: ${userType}_${rideId}, ride_${rideId}`);
     });
 
+    // ✅ ADD JOIN PASSENGER EVENT
+    socket.on('joinPassenger', (data: { passengerId: string }) => {
+      const { passengerId } = data;
+      if (!passengerId) return;
+      socket.join(`passenger_${passengerId}`);
+      console.log(`socket ${socket.id} joined passenger room: passenger_${passengerId}`);
+    });
+
     socket.on('locationUpdate', (data: { rideId: string; userType: string; coords: { lat: number; lng: number } }) => {
       const { rideId, userType, coords } = data;
       if (!rideId || !userType || !coords) return;
@@ -38,7 +46,7 @@ export function initSocketServer(httpServer: http.Server) {
       if (!rideId || !passengerId) return;
 
       // Notify passenger that booking was accepted
-      io?.to(`passenger_${rideId}`).emit('bookingAccepted', {
+      io?.to(`passenger_${passengerId}`).emit('bookingAccepted', {
         rideId,
         driverInfo,
         passengerInfo,
